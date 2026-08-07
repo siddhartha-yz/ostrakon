@@ -49,7 +49,9 @@ QQ → NapCat → OneBot 11 WebSocket → Ostrakon → SQLite
 - `get_msg` 返回原消息 `user_id`，并可返回 `emoji_likes_list`；
 - `set_group_ban(group_id, user_id, duration)` 为官方 OneBot API。
 
-需要特别注意：NapCat 官方“事件兼容情况”页面目前仍写着 `group_msg_emoji_like` “仅收自己的，其余扩展接口拉取”。这与当前主分支源码的 Packet reaction 解析能力存在文档/实现版本差异。因此生产启用前必须在实际运行的 NapCat 镜像中验证：**其他群成员添加和撤销 reaction 时，是否确实产生带可靠 `user_id` / `is_add` 的事件。**
+需要特别注意：NapCat 官方“事件兼容情况”页面目前仍写着 `group_msg_emoji_like` “仅收自己的，其余扩展接口拉取”。这与当前主分支源码的 Packet reaction 解析能力存在文档/实现版本差异，因此仍应以实际部署版本为准。
+
+本项目部署时已在 **NapCat 4.18.18** 上做真机验证：另一名群成员对普通群消息添加目标 reaction 后收到了 `is_add=true` 事件，撤销同一 reaction 后收到了同一 group/message/emoji 的 `is_add=false` 事件；`get_emoji_likes` 在撤销后也返回 0 个当前用户，与事件状态一致。此次实测中 QQ 客户端“愤怒机器人”的 `emoji_id` 为 **`326`**。不同版本仍建议按下文诊断流程重新确认，不依赖猜测。
 
 Ostrakon 不伪造撤销支持：
 
