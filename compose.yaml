@@ -3,6 +3,8 @@ services:
     image: mlikiowa/napcat-docker:latest
     container_name: ostrakon-napcat
     restart: unless-stopped
+    env_file:
+      - runtime.env
     environment:
       NAPCAT_UID: "${NAPCAT_UID:-1000}"
       NAPCAT_GID: "${NAPCAT_GID:-1001}"
@@ -22,4 +24,7 @@ services:
     env_file:
       - runtime.env
     volumes:
-      - ./data/ostrakon:/data
+      - ostrakon-data:/data
+
+volumes:
+  ostrakon-data:

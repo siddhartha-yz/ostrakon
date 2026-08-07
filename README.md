@@ -71,6 +71,7 @@ cp .env.example runtime.env
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
+| `ACCOUNT` | 空 | NapCat 快速登录 QQ 号；仅写入本地 `runtime.env` |
 | `ONEBOT_WS_URL` | `ws://napcat:3001` | NapCat 正向 WebSocket 服务地址 |
 | `ONEBOT_ACCESS_TOKEN` | 空 | NapCat OneBot token；如设置，两端必须一致 |
 | `ENABLED_GROUPS` | 空 | 允许处理的群号，多个用英文逗号分隔 |
@@ -140,7 +141,9 @@ docker compose up -d napcat
 docker compose logs -f napcat
 ```
 
-完成 QQ 登录后，在 NapCat WebUI 中创建/启用 **WebSocket 服务端（正向 WS）**，监听容器内 `0.0.0.0:3001`。如果设置 OneBot token，把同一个值放入本地 `runtime.env` 的 `ONEBOT_ACCESS_TOKEN`。
+完成首次 QQ 扫码登录后，把该 Bot QQ 号写入本地 `runtime.env` 的 `ACCOUNT`。NapCat Docker 镜像会在后续容器重启时使用 `-q ACCOUNT` 快速登录，避免重复扫码。
+
+然后在 NapCat WebUI 中创建/启用 **WebSocket 服务端（正向 WS）**，监听容器内 `0.0.0.0:3001`。如果设置 OneBot token，把同一个值放入本地 `runtime.env` 的 `ONEBOT_ACCESS_TOKEN`。
 
 Bot 与 NapCat 在 Compose 私有 bridge 网络中通信，不需要把 3001 暴露到宿主机公网。
 
@@ -173,11 +176,7 @@ Compose 使用 `restart: unless-stopped`，SSH 断开不影响运行，Docker da
 /data/ostrakon.sqlite3
 ```
 
-Compose 持久化到：
-
-```text
-./data/ostrakon/ostrakon.sqlite3
-```
+Compose 使用 Docker named volume `ostrakon-data` 持久化 `/data`。这样 Bot 可以保持非 root 运行，同时避免宿主机目录的 UID/GID 权限问题。
 
 SQLite 至少保存：
 
