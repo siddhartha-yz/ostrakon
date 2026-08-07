@@ -72,26 +72,41 @@ class OneBotWebSocketClient:
             delay = min(delay * 2, 30.0)
 
     async def _receive_loop(self, ws: ClientConnection, handler: EventHandler) -> None:
-        async for raw in ws:
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning("discarding invalid JSON from OneBot")
-                continue
-            if not isinstance(payload, dict):
-                continue
-            if "echo" in payload and payload.get("echo") is not None:
-                echo = str(payload["echo"])
-                future = self._pending.pop(echo, None)
-                if future is not None and not future.done():
-                    future.set_result(payload)
-                continue
-            if payload.get("self_id") is not None:
-                self.self_id = str(payload["self_id"])
-            try:
-                await handler(payload)
-            except Exception:
-                logger.exception("unhandled error while processing OneBot event")
+        event_tasks: set[asyncio.Task[None]] = set()
+        try:
+            async for raw in ws:
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning("discarding invalid JSON from OneBot")
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if "echo" in payload and payload.get("echo") is not None:
+                    echo = str(payload["echo"])
+                    future = self._pending.pop(echo, None)
+                    if future is not None and not future.done():
+                        future.set_result(payload)
+                    continue
+                if payload.get("self_id") is not None:
+                    self.self_id = str(payload["self_id"])
+                task = asyncio.create_task(self._run_handler(handler, payload))
+                event_tasks.add(task)
+                task.add_done_callback(event_tasks.discard)
+        finally:
+            for task in event_tasks:
+                task.cancel()
+            if event_tasks:
+                await asyncio.gather(*event_tasks, return_exceptions=True)
+
+    @staticmethod
+    async def _run_handler(handler: EventHandler, payload: dict[str, Any]) -> None:
+        try:
+            await handler(payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("unhandled error while processing OneBot event")
 
     async def call(self, action: str, params: dict[str, Any]) -> Any:
         await asyncio.wait_for(self._connected.wait(), timeout=self.request_timeout)
