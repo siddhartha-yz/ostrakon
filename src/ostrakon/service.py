@@ -21,6 +21,10 @@ class OstrakonService:
         self._target_locks: defaultdict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
+        if event.get("post_type") == "message" and event.get("message_type") == "group":
+            await self._handle_status_command(event)
+            return
+
         if event.get("post_type") != "notice" or event.get("notice_type") != "group_msg_emoji_like":
             return
 
@@ -67,6 +71,61 @@ class OstrakonService:
             if emoji_id != self.settings.target_reaction_id:
                 continue
             await self._handle_target_reaction(event, group_id, message_id, emoji_id)
+
+    async def _handle_status_command(self, event: dict[str, Any]) -> None:
+        raw_message = event.get("raw_message")
+        if not isinstance(raw_message, str) or raw_message.strip() != "/ostrakon status":
+            return
+
+        group_id = self._id(event.get("group_id"))
+        user_id = self._id(event.get("user_id"))
+        if not group_id or not user_id or group_id not in self.settings.enabled_groups:
+            return
+
+        try:
+            member = await self.gateway.call(
+                "get_group_member_info",
+                {"group_id": group_id, "user_id": user_id, "no_cache": True},
+            )
+        except Exception as exc:
+            logger.warning(
+                "status command authorization failed: group_id=%s error=%s",
+                group_id,
+                exc,
+            )
+            return
+
+        role = member.get("role") if isinstance(member, dict) else None
+        if role not in {"owner", "admin"}:
+            return
+
+        try:
+            database_ok = await self.store.healthcheck()
+        except Exception as exc:
+            database_ok = False
+            logger.warning("database healthcheck failed: group_id=%s error=%s", group_id, exc)
+        reaction = self.settings.target_reaction_id or "not configured"
+        status = (
+            "Ostrakon: active\n"
+            f"Reaction: {reaction}\n"
+            f"Threshold: {self.settings.vote_threshold}\n"
+            f"Mute: {self._format_duration(self.settings.first_mute_seconds)} / "
+            f"repeat {self._format_duration(self.settings.repeat_mute_seconds)}\n"
+            f"Database: {'OK' if database_ok else 'ERROR'}\n"
+            "OneBot: connected"
+        )
+        try:
+            await self.gateway.call("send_group_msg", {"group_id": group_id, "message": status})
+        except Exception as exc:
+            logger.warning("failed to send status response: group_id=%s error=%s", group_id, exc)
+
+    @staticmethod
+    def _format_duration(seconds: int) -> str:
+        if seconds % 3600 == 0:
+            return f"{seconds // 3600}h"
+        if seconds % 60 == 0:
+            return f"{seconds // 60}m"
+        return f"{seconds}s"
 
     async def _handle_target_reaction(
         self,

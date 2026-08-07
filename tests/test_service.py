@@ -25,6 +25,7 @@ class FakeGateway:
         self.members: dict[tuple[str, str], dict[str, Any]] = {}
         self.emoji_voters: dict[tuple[str, str, str], set[str]] = {}
         self.ban_calls: list[dict[str, Any]] = []
+        self.sent_group_messages: list[dict[str, Any]] = []
         self.fail_bans = 0
 
     def add_message(self, group_id: str, message_id: str, author: str) -> None:
@@ -72,6 +73,9 @@ class FakeGateway:
             member = self.members.setdefault(key, {"role": "member"})
             member["shut_up_timestamp"] = time.time() + int(params["duration"])
             return None
+        if action == "send_group_msg":
+            self.sent_group_messages.append(dict(params))
+            return {"message_id": "90001"}
         raise AssertionError(f"unexpected OneBot action: {action}")
 
 
@@ -119,6 +123,59 @@ async def build(tmp_path: Path, *, groups: frozenset[str] = frozenset({GROUP})):
     store = Store(tmp_path / "state.sqlite3")
     service = OstrakonService(settings(tmp_path / "state.sqlite3", groups), store, gateway)
     return service, store, gateway
+
+
+def status_event(user_id: str, *, group: str = GROUP) -> dict[str, Any]:
+    return {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": group,
+        "user_id": user_id,
+        "raw_message": "/ostrakon status",
+        "self_id": BOT,
+    }
+
+
+@pytest.mark.asyncio
+async def test_admin_status_command_reports_health(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.members[(GROUP, "30000")] = {"role": "admin", "shut_up_timestamp": 0}
+    try:
+        await service.handle_event(status_event("30000"))
+        assert len(gateway.sent_group_messages) == 1
+        reply = gateway.sent_group_messages[0]
+        assert str(reply["group_id"]) == GROUP
+        assert "Ostrakon: active" in str(reply["message"])
+        assert f"Reaction: {TARGET}" in str(reply["message"])
+        assert "Threshold: 5" in str(reply["message"])
+        assert "Mute: 10m / repeat 2h" in str(reply["message"])
+        assert "Database: OK" in str(reply["message"])
+        assert "OneBot: connected" in str(reply["message"])
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_regular_member_cannot_use_status_command(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.members[(GROUP, "30000")] = {"role": "member", "shut_up_timestamp": 0}
+    try:
+        await service.handle_event(status_event("30000"))
+        assert gateway.sent_group_messages == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_status_command_ignored_outside_enabled_groups(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    other_group = "10002"
+    gateway.members[(other_group, "30000")] = {"role": "owner", "shut_up_timestamp": 0}
+    try:
+        await service.handle_event(status_event("30000", group=other_group))
+        assert gateway.sent_group_messages == []
+    finally:
+        await store.close()
 
 
 @pytest.mark.asyncio

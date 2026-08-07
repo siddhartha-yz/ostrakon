@@ -87,6 +87,11 @@ class Store:
         async with self._lock:
             self._conn.close()
 
+    async def healthcheck(self) -> bool:
+        async with self._lock:
+            row = self._conn.execute("SELECT 1 AS ok").fetchone()
+        return bool(row and int(row["ok"]) == 1)
+
     async def get_message(self, group_id: str, message_id: str) -> MessageState | None:
         async with self._lock:
             row = self._conn.execute(

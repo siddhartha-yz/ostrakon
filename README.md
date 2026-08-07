@@ -4,6 +4,8 @@ Ostrakon（陶片放逐法）是一个极小的 QQ 群管理 Bot：群成员对�
 
 当前项目只实现这一条规则，不包含 AI 审核、关键词审核、Web 管理后台、积分、欢迎消息或其他群管理功能。
 
+另外提供一个只读管理员健康检查命令：`/ostrakon status`。它只在 `ENABLED_GROUPS` 中生效，且仅群主/管理员可用；命令只能查看 Bot 是否在线及当前陶片放逐法配置，不能修改任何配置。
+
 ## 规则
 
 默认策略：
@@ -169,6 +171,16 @@ docker compose logs -f bot
 ```
 
 Compose 使用 `restart: unless-stopped`，SSH 断开不影响运行，Docker daemon/服务器重启后容器会自动恢复。
+
+## 管理员健康检查
+
+在已启用的群中，群主或管理员发送：
+
+```text
+/ostrakon status
+```
+
+Bot 会返回当前是否激活、reaction ID、票数阈值、禁言时长、SQLite 状态和 OneBot 连接状态。普通群员和未启用群不会得到响应。该命令是只读的，不能修改阈值、白名单、reaction ID 或其他配置。
 
 ## SQLite 状态
 
