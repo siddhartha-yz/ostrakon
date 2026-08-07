@@ -1,0 +1,56 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+runtime.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+*.cookie
+*.secret
+credentials.json
+secrets/
+
+# Python
+.venv/
+venv/
+.deps/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Runtime data
+/data/
+data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+*.log
+logs/
+
+# NapCat / QQ runtime state
+napcat/config/
+napcat/qq/
+qq-data/
+QQ/
+
+# IDE / OS / temporary downloads
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*.tmp
+*.part
+*.download
