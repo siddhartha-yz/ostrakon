@@ -143,21 +143,24 @@ class OstrakonService:
 
         voter_id = self._id(event.get("user_id") or event.get("operator_id"))
         is_add = event.get("is_add")
+        count: int | None = None
         if voter_id and voter_id != "0" and isinstance(is_add, bool):
             count = await self.store.apply_vote(
                 group_id, message_id, voter_id, emoji_id, is_add
             )
-        else:
-            count = await self._reconcile_reaction_voters(group_id, message_id, emoji_id)
-            if count is None:
-                logger.warning(
-                    "reaction event cannot be applied reliably: "
-                    "group_id=%s message_id=%s emoji_id=%s",
-                    group_id,
-                    message_id,
-                    emoji_id,
-                )
-                return
+
+        reconciled_count = await self._reconcile_reaction_voters(group_id, message_id, emoji_id)
+        if reconciled_count is not None:
+            count = reconciled_count
+        if count is None:
+            logger.warning(
+                "reaction event cannot be applied reliably: "
+                "group_id=%s message_id=%s emoji_id=%s",
+                group_id,
+                message_id,
+                emoji_id,
+            )
+            return
 
         logger.info(
             "reaction vote count changed: group_id=%s message_id=%s emoji_id=%s votes=%d",

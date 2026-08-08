@@ -24,6 +24,7 @@ class FakeGateway:
         self.messages: dict[str, dict[str, Any]] = {}
         self.members: dict[tuple[str, str], dict[str, Any]] = {}
         self.emoji_voters: dict[tuple[str, str, str], set[str]] = {}
+        self.emoji_snapshot_available = False
         self.ban_calls: list[dict[str, Any]] = []
         self.sent_group_messages: list[dict[str, Any]] = []
         self.fail_bans = 0
@@ -51,6 +52,8 @@ class FakeGateway:
             key = (str(params["group_id"]), str(params["user_id"]))
             return dict(self.members.get(key, {"role": "member", "shut_up_timestamp": 0}))
         if action == "get_emoji_likes":
+            if not self.emoji_snapshot_available:
+                return None
             key = (
                 str(params["group_id"]),
                 str(params["message_id"]),
@@ -410,10 +413,30 @@ async def test_successful_state_survives_restart_without_repunishing(tmp_path: P
 @pytest.mark.asyncio
 async def test_missing_operator_fields_fall_back_to_current_reaction_list(tmp_path: Path):
     service, store, gateway = await build(tmp_path)
+    gateway.emoji_snapshot_available = True
     gateway.emoji_voters[(GROUP, "30001", TARGET)] = {"1", "2", "3", "4", "5"}
     try:
         await service.handle_event(event(None, is_add=None))
         assert len(gateway.ban_calls) == 1
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_reaction_snapshot_recovers_votes_missed_while_offline(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.emoji_snapshot_available = True
+    gateway.emoji_voters[(GROUP, "30001", TARGET)] = {"1", "2", "3", "4", "5", "6", "7"}
+    try:
+        await store.ensure_message(GROUP, "30001", AUTHOR)
+        for voter in ("1", "2", "3", "4"):
+            await store.apply_vote(GROUP, "30001", voter, TARGET, True)
+
+        await service.handle_event(event("7"))
+
+        assert len(gateway.ban_calls) == 1
+        state = await store.get_message(GROUP, "30001")
+        assert state is not None and state.status == "punished"
     finally:
         await store.close()
 
