@@ -398,6 +398,14 @@ class Store:
                 (group_id, user_id, when),
             )
 
+    async def reset_punishment_history(self, group_id: str, user_id: str) -> bool:
+        async with self._lock:
+            deleted = self._conn.execute(
+                "DELETE FROM punishments WHERE group_id=? AND user_id=?",
+                (group_id, user_id),
+            ).rowcount
+        return deleted == 1
+
     @staticmethod
     def _row_to_state(row: sqlite3.Row) -> MessageState:
         return MessageState(

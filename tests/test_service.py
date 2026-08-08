@@ -139,6 +139,27 @@ def status_event(user_id: str, *, group: str = GROUP) -> dict[str, Any]:
     }
 
 
+def reset_event(
+    user_id: str,
+    *,
+    group: str = GROUP,
+    reply_message_id: str | None = "30001",
+) -> dict[str, Any]:
+    message: list[dict[str, Any]] = []
+    if reply_message_id is not None:
+        message.append({"type": "reply", "data": {"id": reply_message_id}})
+    message.append({"type": "text", "data": {"text": "/reset"}})
+    return {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": group,
+        "user_id": user_id,
+        "raw_message": "/reset",
+        "message": message,
+        "self_id": BOT,
+    }
+
+
 @pytest.mark.asyncio
 async def test_admin_status_command_reports_health(tmp_path: Path):
     service, store, gateway = await build(tmp_path)
@@ -177,6 +198,55 @@ async def test_status_command_ignored_outside_enabled_groups(tmp_path: Path):
     try:
         await service.handle_event(status_event("30000", group=other_group))
         assert gateway.sent_group_messages == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_clears_repeat_history_for_replied_member(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.members[(GROUP, "30000")] = {"role": "admin", "shut_up_timestamp": 0}
+    gateway.add_message(GROUP, "30002", AUTHOR)
+    await store.set_last_punished_at(GROUP, AUTHOR, time.time())
+    try:
+        await service.handle_event(reset_event("30000"))
+        assert len(gateway.sent_group_messages) == 1
+        assert "repeat punishment history reset" in str(
+            gateway.sent_group_messages[0]["message"]
+        )
+
+        for voter in ("11", "12", "13", "14", "15"):
+            await service.handle_event(event(voter, message="30002"))
+        assert gateway.ban_calls[0]["duration"] == 600
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_regular_member_cannot_reset_repeat_history(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.members[(GROUP, "30000")] = {"role": "member", "shut_up_timestamp": 0}
+    gateway.add_message(GROUP, "30002", AUTHOR)
+    await store.set_last_punished_at(GROUP, AUTHOR, time.time())
+    try:
+        await service.handle_event(reset_event("30000"))
+        assert gateway.sent_group_messages == []
+
+        for voter in ("11", "12", "13", "14", "15"):
+            await service.handle_event(event(voter, message="30002"))
+        assert gateway.ban_calls[0]["duration"] == 7200
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_requires_reply(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.members[(GROUP, "30000")] = {"role": "owner", "shut_up_timestamp": 0}
+    try:
+        await service.handle_event(reset_event("30000", reply_message_id=None))
+        assert len(gateway.sent_group_messages) == 1
+        assert "reply to a member's message" in str(gateway.sent_group_messages[0]["message"])
     finally:
         await store.close()
 
@@ -252,6 +322,23 @@ async def test_repeat_within_seven_days_uses_two_hours(tmp_path: Path):
         for voter in ("11", "12", "13", "14", "15"):
             await service.handle_event(event(voter, message="30002"))
         assert [call["duration"] for call in gateway.ban_calls] == [600, 7200]
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_third_punishment_within_seven_days_stays_two_hours(tmp_path: Path):
+    service, store, gateway = await build(tmp_path)
+    gateway.add_message(GROUP, "30002", AUTHOR)
+    gateway.add_message(GROUP, "30003", AUTHOR)
+    try:
+        for voter in ("1", "2", "3", "4", "5"):
+            await service.handle_event(event(voter, message="30001"))
+        for voter in ("11", "12", "13", "14", "15"):
+            await service.handle_event(event(voter, message="30002"))
+        for voter in ("21", "22", "23", "24", "25"):
+            await service.handle_event(event(voter, message="30003"))
+        assert [call["duration"] for call in gateway.ban_calls] == [600, 7200, 7200]
     finally:
         await store.close()
 

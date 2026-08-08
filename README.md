@@ -4,7 +4,7 @@ Ostrakon（陶片放逐法）是一个极小的 QQ 群管理 Bot：群成员对�
 
 当前项目只实现这一条规则，不包含 AI 审核、关键词审核、Web 管理后台、积分、欢迎消息或其他群管理功能。
 
-另外提供一个只读管理员健康检查命令：`/ostrakon status`。它只在 `ENABLED_GROUPS` 中生效，且仅群主/管理员可用；命令只能查看 Bot 是否在线及当前陶片放逐法配置，不能修改任何配置。
+另外提供两个窄范围管理员命令：`/ostrakon status` 用于只读健康检查；回复某个成员的消息发送 `/reset`，可清除该成员在当前群的 7 天重复处罚记录。两者都只在 `ENABLED_GROUPS` 中生效，且仅群主/管理员可用。
 
 ## 规则
 
@@ -15,8 +15,8 @@ Ostrakon（陶片放逐法）是一个极小的 QQ 群管理 Bot：群成员对�
 - 同一用户对同一消息最多贡献 1 票。
 - 达到阈值后，同一条消息最多成功处罚一次。
 - 首次处罚：禁言 600 秒。
-- 同一群内，同一用户最近 7 天曾因 Ostrakon 成功被处罚：禁言 7200 秒。
-- 超过 7 天后恢复为 600 秒。
+- 同一群内，同一用户最近 7 天曾因 Ostrakon 成功被处罚：禁言 7200 秒；第 3 次及以后只要仍处于滚动 7 天窗口内，也保持 7200 秒。
+- 距离上一次成功处罚超过 7 天后恢复为 600 秒。
 - 群、消息、投票状态全部按 group_id 隔离。
 - 群主、管理员、Bot 自身不会被禁言。
 
@@ -35,7 +35,7 @@ QQ → NapCat → OneBot 11 WebSocket → Ostrakon → SQLite
 - `get_msg`：根据 message_id 获取原消息和发送者；
 - `get_group_member_info`：禁言前重新检查 Bot 与目标成员权限；
 - `set_group_ban`：执行群禁言；
-- `get_emoji_likes`：当 reaction 事件缺少可靠操作者/增减字段时，尝试拉取当前 reaction 用户列表做状态对齐。
+- `get_emoji_likes`：收到目标 reaction 事件时拉取当前 reaction 用户列表做权威对账；若快照调用失败，再退回事件增量计票。
 
 ## NapCat reaction 调查结果
 
@@ -57,8 +57,8 @@ QQ → NapCat → OneBot 11 WebSocket → Ostrakon → SQLite
 
 Ostrakon 不伪造撤销支持：
 
-- 若事件提供可靠 `user_id + is_add`，直接做幂等增减票；
-- 若缺少这些字段但收到 reaction 事件，则调用 `get_emoji_likes` 拉当前投票者列表并对齐 SQLite；
+- 若事件提供可靠 `user_id + is_add`，先做幂等增减票，再调用 `get_emoji_likes` 用当前投票者快照对齐 SQLite，从而恢复掉线期间漏掉的票；
+- 若事件缺少可靠操作者/增减字段，则直接尝试 `get_emoji_likes` 快照对齐；
 - 若实际 NapCat 版本根本不向 Bot 推送其他成员的 reaction 变化，则无法仅靠事件可靠触发该机制，必须升级/调整 NapCat，而不是假装支持。
 
 ## 配置
@@ -172,7 +172,7 @@ docker compose logs -f bot
 
 Compose 使用 `restart: unless-stopped`，SSH 断开不影响运行，Docker daemon/服务器重启后容器会自动恢复。
 
-## 管理员健康检查
+## 管理员命令
 
 在已启用的群中，群主或管理员发送：
 
@@ -180,7 +180,15 @@ Compose 使用 `restart: unless-stopped`，SSH 断开不影响运行，Docker da
 /ostrakon status
 ```
 
-Bot 会返回当前是否激活、reaction ID、票数阈值、禁言时长、SQLite 状态和 OneBot 连接状态。普通群员和未启用群不会得到响应。该命令是只读的，不能修改阈值、白名单、reaction ID 或其他配置。
+Bot 会返回当前是否激活、reaction ID、票数阈值、禁言时长、SQLite 状态和 OneBot 连接状态。
+
+若要清除某个成员的 7 天重复处罚记录，**回复该成员的一条消息**并发送：
+
+```text
+/reset
+```
+
+成功后，该成员下一次达到处罚阈值会重新按首次处罚 10 分钟计算。`/reset` 只影响当前群的重复处罚记录，不解除已经生效的禁言，也不会让已经成功处罚过的旧消息再次触发。普通群员和未启用群不能使用这些命令。
 
 ## SQLite 状态
 
@@ -240,7 +248,7 @@ docker run --rm -v "$PWD:/app" -w /app python:3.12-slim sh -lc \
 - 不禁言群主、管理员、Bot 自身；
 - OneBot 调用失败不会被记录成成功处罚；
 - API 失败后会检查目标当前禁言状态，避免“实际成功但响应丢失”时错误记录失败；
-- 不实现聊天命令，不允许普通成员修改配置；
+- 只实现 `/ostrakon status` 与回复式 `/reset` 两个窄范围管理员命令；普通成员不能使用，也不能通过聊天修改配置；
 - `runtime.env`、QQ 登录数据、NapCat runtime 配置、SQLite、日志均不进入 Git；
 - 日志不记录 access token、cookie、密码或完整聊天内容。
 
@@ -249,4 +257,4 @@ docker run --rm -v "$PWD:/app" -w /app python:3.12-slim sh -lc \
 1. QQ reaction 是 NapCat/QQNT 的扩展能力，不是 OneBot 11 核心标准；不同 NapCat/QQNT 版本可能改变可见事件。
 2. 当前官方兼容文档与 NapCat 最新主分支源码对“其他成员 reaction 是否直接上报”存在版本差异，必须以部署实例的真实事件为准。
 3. `set_group_ban` 不是带业务幂等键的事务 API。Ostrakon 能保证本地并发下只发出一个调用，并在 API 报错后核验当前禁言状态，但网络在“服务端已成功、客户端完全无法确认”的极端故障窗口中无法实现严格的分布式 exactly-once。
-4. 当前阶段没有 Web 管理后台、聊天管理命令或第二种管理规则。
+4. 当前阶段没有 Web 管理后台或通用聊天管理系统；仅提供 `/ostrakon status` 与回复式 `/reset`，不支持通过聊天修改阈值、白名单或 reaction 配置。

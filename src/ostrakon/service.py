@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Any
@@ -23,6 +24,7 @@ class OstrakonService:
     async def handle_event(self, event: dict[str, Any]) -> None:
         if event.get("post_type") == "message" and event.get("message_type") == "group":
             await self._handle_status_command(event)
+            await self._handle_reset_command(event)
             return
 
         if event.get("post_type") != "notice" or event.get("notice_type") != "group_msg_emoji_like":
@@ -118,6 +120,104 @@ class OstrakonService:
             await self.gateway.call("send_group_msg", {"group_id": group_id, "message": status})
         except Exception as exc:
             logger.warning("failed to send status response: group_id=%s error=%s", group_id, exc)
+
+    async def _handle_reset_command(self, event: dict[str, Any]) -> None:
+        if self._message_text(event) != "/reset":
+            return
+
+        group_id = self._id(event.get("group_id"))
+        user_id = self._id(event.get("user_id"))
+        if not group_id or not user_id or group_id not in self.settings.enabled_groups:
+            return
+
+        try:
+            member = await self.gateway.call(
+                "get_group_member_info",
+                {"group_id": group_id, "user_id": user_id, "no_cache": True},
+            )
+        except Exception as exc:
+            logger.warning(
+                "reset command authorization failed: group_id=%s error=%s",
+                group_id,
+                exc,
+            )
+            return
+
+        role = member.get("role") if isinstance(member, dict) else None
+        if role not in {"owner", "admin"}:
+            return
+
+        reply_message_id = self._reply_message_id(event)
+        if not reply_message_id:
+            await self._send_group_text(
+                group_id,
+                "Usage: reply to a member's message with /reset",
+                log_context="reset usage",
+            )
+            return
+
+        target_user_id = await self._resolve_message_sender(group_id, reply_message_id)
+        if target_user_id is None:
+            await self._send_group_text(
+                group_id,
+                "Reset failed: could not resolve the replied member.",
+                log_context="reset failure",
+            )
+            return
+
+        cleared = await self.store.reset_punishment_history(group_id, target_user_id)
+        logger.info(
+            "punishment repeat history reset: group_id=%s target_user_id=%s existed=%s",
+            group_id,
+            target_user_id,
+            cleared,
+        )
+        await self._send_group_text(
+            group_id,
+            "Ostrakon: repeat punishment history reset.\n"
+            "Next qualifying punishment: 10m\n"
+            "Current mute: unchanged",
+            log_context="reset confirmation",
+        )
+
+    async def _send_group_text(self, group_id: str, message: str, *, log_context: str) -> None:
+        try:
+            await self.gateway.call("send_group_msg", {"group_id": group_id, "message": message})
+        except Exception as exc:
+            logger.warning("failed to send %s: group_id=%s error=%s", log_context, group_id, exc)
+
+    @staticmethod
+    def _message_text(event: dict[str, Any]) -> str:
+        message = event.get("message")
+        if isinstance(message, list):
+            text = "".join(
+                str(segment.get("data", {}).get("text", ""))
+                for segment in message
+                if isinstance(segment, dict) and segment.get("type") == "text"
+            ).strip()
+            if text:
+                return text
+        raw_message = event.get("raw_message")
+        if not isinstance(raw_message, str):
+            return ""
+        return re.sub(r"\[CQ:[^\]]+\]", "", raw_message).strip()
+
+    @classmethod
+    def _reply_message_id(cls, event: dict[str, Any]) -> str:
+        message = event.get("message")
+        if isinstance(message, list):
+            for segment in message:
+                if not isinstance(segment, dict) or segment.get("type") != "reply":
+                    continue
+                reply_id = cls._id((segment.get("data") or {}).get("id"))
+                if reply_id:
+                    return reply_id
+        raw_message = event.get("raw_message")
+        if isinstance(raw_message, str):
+            match = re.search(r"\[CQ:reply,id=([^,\]]+)", raw_message)
+            if match:
+                return match.group(1)
+        return ""
 
     @staticmethod
     def _format_duration(seconds: int) -> str:
