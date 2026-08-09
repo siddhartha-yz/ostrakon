@@ -40,7 +40,7 @@ class Settings:
             onebot_access_token=os.getenv("ONEBOT_ACCESS_TOKEN", "").strip(),
             enabled_groups=_csv_set(os.getenv("ENABLED_GROUPS", "")),
             target_reaction_id=os.getenv("TARGET_REACTION_ID", "").strip(),
-            vote_threshold=_positive_int("VOTE_THRESHOLD", 5),
+            vote_threshold=_positive_int("VOTE_THRESHOLD", 10),
             first_mute_seconds=_positive_int("FIRST_MUTE_SECONDS", 600),
             repeat_mute_seconds=_positive_int("REPEAT_MUTE_SECONDS", 7200),
             repeat_window_seconds=_positive_int("REPEAT_WINDOW_SECONDS", 7 * 24 * 3600),

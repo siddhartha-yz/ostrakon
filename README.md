@@ -11,7 +11,7 @@ Ostrakon（陶片放逐法）是一个极小的 QQ 群管理 Bot：群成员对�
 默认策略：
 
 - 只统计配置的目标 reaction（“愤怒机器人”的实际 ID 需要在真实 QQ/NapCat 环境中确认）。
-- 同一条消息需要 5 个不同 QQ 用户的有效 reaction。
+- 同一条消息需要 10 个不同 QQ 用户的有效 reaction。
 - 同一用户对同一消息最多贡献 1 票。
 - 达到阈值后，同一条消息最多成功处罚一次。
 - 首次处罚：禁言 600 秒。
@@ -80,7 +80,7 @@ cp .env.example runtime.env
 | `ONEBOT_ACCESS_TOKEN` | 空 | NapCat OneBot token；如设置，两端必须一致 |
 | `ENABLED_GROUPS` | 空 | 允许处理的群号，多个用英文逗号分隔 |
 | `TARGET_REACTION_ID` | 空 | 目标 reaction/emoji ID |
-| `VOTE_THRESHOLD` | `5` | 不同投票用户阈值 |
+| `VOTE_THRESHOLD` | `10` | 不同投票用户阈值 |
 | `FIRST_MUTE_SECONDS` | `600` | 首次处罚时长 |
 | `REPEAT_MUTE_SECONDS` | `7200` | 7 天内重复处罚时长 |
 | `REPEAT_WINDOW_SECONDS` | `604800` | 重复处罚窗口 |
