@@ -3,17 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ostrakon"
-version = "0.1.0"
-description = "Reaction-vote based QQ group moderation for NapCat/OneBot 11"
+name = "astrbot-plugin-ostrakon"
+version = "0.2.0"
+description = "Reaction-vote moderation plugin for AstrBot on OneBot v11 / NapCat"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-  "websockets>=15.0,<16",
-]
-
-[project.scripts]
-ostrakon = "ostrakon.main:main"
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
@@ -21,6 +16,9 @@ dev = [
   "pytest-asyncio>=0.24,<1",
   "ruff>=0.12,<1",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ostrakon"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

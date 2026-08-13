@@ -84,8 +84,6 @@ class FakeGateway:
 
 def settings(path: Path, groups: frozenset[str] = frozenset({GROUP})) -> Settings:
     return Settings(
-        onebot_ws_url="ws://test",
-        onebot_access_token="",
         enabled_groups=groups,
         target_reaction_id=TARGET,
         vote_threshold=5,
@@ -93,7 +91,6 @@ def settings(path: Path, groups: frozenset[str] = frozenset({GROUP})) -> Setting
         repeat_mute_seconds=7200,
         repeat_window_seconds=7 * 24 * 3600,
         database_path=path,
-        log_level="INFO",
     )
 
 
@@ -148,13 +145,13 @@ def reset_event(
     message: list[dict[str, Any]] = []
     if reply_message_id is not None:
         message.append({"type": "reply", "data": {"id": reply_message_id}})
-    message.append({"type": "text", "data": {"text": "/reset"}})
+    message.append({"type": "text", "data": {"text": "/ostrakon reset"}})
     return {
         "post_type": "message",
         "message_type": "group",
         "group_id": group,
         "user_id": user_id,
-        "raw_message": "/reset",
+        "raw_message": "/ostrakon reset",
         "message": message,
         "self_id": BOT,
     }

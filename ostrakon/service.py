@@ -7,24 +7,36 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from ostrakon.config import Settings
-from ostrakon.db import PunishmentClaim, Store
-from ostrakon.onebot import OneBotAPIError, OneBotGateway
+from .config import Settings
+from .db import PunishmentClaim, Store
+from .onebot import OneBotAPIError, OneBotGateway
 
 logger = logging.getLogger(__name__)
 
 
 class OstrakonService:
-    def __init__(self, settings: Settings, store: Store, gateway: OneBotGateway) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        store: Store,
+        gateway: OneBotGateway | None = None,
+    ) -> None:
         self.settings = settings
         self.store = store
-        self.gateway = gateway
+        self._default_gateway = gateway
         self._target_locks: defaultdict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    async def handle_event(self, event: dict[str, Any]) -> None:
+    async def handle_event(
+        self,
+        event: dict[str, Any],
+        gateway: OneBotGateway | None = None,
+    ) -> None:
+        gateway = gateway or self._default_gateway
+        if gateway is None:
+            raise RuntimeError("OneBot gateway is required for event handling")
         if event.get("post_type") == "message" and event.get("message_type") == "group":
-            await self._handle_status_command(event)
-            await self._handle_reset_command(event)
+            await self._handle_status_command(event, gateway)
+            await self._handle_reset_command(event, gateway)
             return
 
         if event.get("post_type") != "notice" or event.get("notice_type") != "group_msg_emoji_like":
@@ -59,7 +71,7 @@ class OstrakonService:
             if not emoji_id:
                 continue
             if not self.settings.target_reaction_id:
-                emoji_type = await self._diagnostic_emoji_type(message_id, emoji_id)
+                emoji_type = await self._diagnostic_emoji_type(message_id, emoji_id, gateway)
                 logger.info(
                     "reaction diagnostic: emoji_id=%s emoji_type=%s "
                     "message_id=%s group_id=%s is_add=%s",
@@ -72,9 +84,11 @@ class OstrakonService:
                 continue
             if emoji_id != self.settings.target_reaction_id:
                 continue
-            await self._handle_target_reaction(event, group_id, message_id, emoji_id)
+            await self._handle_target_reaction(event, group_id, message_id, emoji_id, gateway)
 
-    async def _handle_status_command(self, event: dict[str, Any]) -> None:
+    async def _handle_status_command(
+        self, event: dict[str, Any], gateway: OneBotGateway
+    ) -> None:
         raw_message = event.get("raw_message")
         if not isinstance(raw_message, str) or raw_message.strip() != "/ostrakon status":
             return
@@ -85,7 +99,7 @@ class OstrakonService:
             return
 
         try:
-            member = await self.gateway.call(
+            member = await gateway.call(
                 "get_group_member_info",
                 {"group_id": group_id, "user_id": user_id, "no_cache": True},
             )
@@ -117,12 +131,14 @@ class OstrakonService:
             "OneBot: connected"
         )
         try:
-            await self.gateway.call("send_group_msg", {"group_id": group_id, "message": status})
+            await gateway.call("send_group_msg", {"group_id": group_id, "message": status})
         except Exception as exc:
             logger.warning("failed to send status response: group_id=%s error=%s", group_id, exc)
 
-    async def _handle_reset_command(self, event: dict[str, Any]) -> None:
-        if self._message_text(event) != "/reset":
+    async def _handle_reset_command(
+        self, event: dict[str, Any], gateway: OneBotGateway
+    ) -> None:
+        if self._message_text(event) not in {"/reset", "/ostrakon reset"}:
             return
 
         group_id = self._id(event.get("group_id"))
@@ -131,7 +147,7 @@ class OstrakonService:
             return
 
         try:
-            member = await self.gateway.call(
+            member = await gateway.call(
                 "get_group_member_info",
                 {"group_id": group_id, "user_id": user_id, "no_cache": True},
             )
@@ -151,17 +167,21 @@ class OstrakonService:
         if not reply_message_id:
             await self._send_group_text(
                 group_id,
-                "Usage: reply to a member's message with /reset",
+                "Usage: reply to a member's message with /ostrakon reset",
                 log_context="reset usage",
+                gateway=gateway,
             )
             return
 
-        target_user_id = await self._resolve_message_sender(group_id, reply_message_id)
+        target_user_id = await self._resolve_message_sender(
+            group_id, reply_message_id, gateway
+        )
         if target_user_id is None:
             await self._send_group_text(
                 group_id,
                 "Reset failed: could not resolve the replied member.",
                 log_context="reset failure",
+                gateway=gateway,
             )
             return
 
@@ -178,11 +198,19 @@ class OstrakonService:
             "Next qualifying punishment: 10m\n"
             "Current mute: unchanged",
             log_context="reset confirmation",
+            gateway=gateway,
         )
 
-    async def _send_group_text(self, group_id: str, message: str, *, log_context: str) -> None:
+    async def _send_group_text(
+        self,
+        group_id: str,
+        message: str,
+        *,
+        log_context: str,
+        gateway: OneBotGateway,
+    ) -> None:
         try:
-            await self.gateway.call("send_group_msg", {"group_id": group_id, "message": message})
+            await gateway.call("send_group_msg", {"group_id": group_id, "message": message})
         except Exception as exc:
             logger.warning("failed to send %s: group_id=%s error=%s", log_context, group_id, exc)
 
@@ -233,10 +261,11 @@ class OstrakonService:
         group_id: str,
         message_id: str,
         emoji_id: str,
+        gateway: OneBotGateway,
     ) -> None:
         state = await self.store.get_message(group_id, message_id)
         if state is None:
-            sender_id = await self._resolve_message_sender(group_id, message_id)
+            sender_id = await self._resolve_message_sender(group_id, message_id, gateway)
             if sender_id is None:
                 return
             state = await self.store.ensure_message(group_id, message_id, sender_id)
@@ -249,7 +278,9 @@ class OstrakonService:
                 group_id, message_id, voter_id, emoji_id, is_add
             )
 
-        reconciled_count = await self._reconcile_reaction_voters(group_id, message_id, emoji_id)
+        reconciled_count = await self._reconcile_reaction_voters(
+            group_id, message_id, emoji_id, gateway
+        )
         if reconciled_count is not None:
             count = reconciled_count
         if count is None:
@@ -289,11 +320,13 @@ class OstrakonService:
             claim.duration_seconds,
         )
         async with self._target_locks[(claim.group_id, claim.target_user_id)]:
-            await self._execute_claim(claim)
+            await self._execute_claim(claim, gateway)
 
-    async def _resolve_message_sender(self, group_id: str, message_id: str) -> str | None:
+    async def _resolve_message_sender(
+        self, group_id: str, message_id: str, gateway: OneBotGateway
+    ) -> str | None:
         try:
-            message = await self.gateway.call("get_msg", {"message_id": message_id})
+            message = await gateway.call("get_msg", {"message_id": message_id})
         except Exception as exc:
             logger.warning(
                 "failed to resolve reacted message: group_id=%s message_id=%s error=%s",
@@ -318,10 +351,10 @@ class OstrakonService:
         return sender_id
 
     async def _reconcile_reaction_voters(
-        self, group_id: str, message_id: str, emoji_id: str
+        self, group_id: str, message_id: str, emoji_id: str, gateway: OneBotGateway
     ) -> int | None:
         try:
-            data = await self.gateway.call(
+            data = await gateway.call(
                 "get_emoji_likes",
                 {
                     "group_id": group_id,
@@ -347,9 +380,11 @@ class OstrakonService:
         }
         return await self.store.reconcile_votes(group_id, message_id, emoji_id, voters)
 
-    async def _diagnostic_emoji_type(self, message_id: str, emoji_id: str) -> str:
+    async def _diagnostic_emoji_type(
+        self, message_id: str, emoji_id: str, gateway: OneBotGateway
+    ) -> str:
         try:
-            message = await self.gateway.call("get_msg", {"message_id": message_id})
+            message = await gateway.call("get_msg", {"message_id": message_id})
         except Exception:
             return "unknown"
         if not isinstance(message, dict):
@@ -359,11 +394,11 @@ class OstrakonService:
                 return self._id(item.get("emoji_type")) or "unknown"
         return "unknown"
 
-    async def _execute_claim(self, claim: PunishmentClaim) -> None:
-        self_id = self.gateway.self_id
+    async def _execute_claim(self, claim: PunishmentClaim, gateway: OneBotGateway) -> None:
+        self_id = gateway.self_id
         if not self_id:
             try:
-                login = await self.gateway.call("get_login_info", {})
+                login = await gateway.call("get_login_info", {})
                 if isinstance(login, dict):
                     self_id = self._id(login.get("user_id"))
             except Exception as exc:
@@ -384,11 +419,11 @@ class OstrakonService:
             return
 
         try:
-            target = await self.gateway.call(
+            target = await gateway.call(
                 "get_group_member_info",
                 {"group_id": claim.group_id, "user_id": claim.target_user_id, "no_cache": True},
             )
-            bot_member = await self.gateway.call(
+            bot_member = await gateway.call(
                 "get_group_member_info",
                 {"group_id": claim.group_id, "user_id": self_id, "no_cache": True},
             )
@@ -431,7 +466,7 @@ class OstrakonService:
 
         attempts = await self.store.record_api_attempt(claim.group_id, claim.message_id)
         try:
-            await self.gateway.call(
+            await gateway.call(
                 "set_group_ban",
                 {
                     "group_id": claim.group_id,
@@ -440,7 +475,7 @@ class OstrakonService:
                 },
             )
         except Exception as exc:
-            confirmed = await self._confirm_target_is_muted(claim)
+            confirmed = await self._confirm_target_is_muted(claim, gateway)
             if confirmed:
                 await self.store.mark_success(
                     claim.group_id,
@@ -485,9 +520,11 @@ class OstrakonService:
             claim.duration_seconds,
         )
 
-    async def _confirm_target_is_muted(self, claim: PunishmentClaim) -> bool:
+    async def _confirm_target_is_muted(
+        self, claim: PunishmentClaim, gateway: OneBotGateway
+    ) -> bool:
         try:
-            target = await self.gateway.call(
+            target = await gateway.call(
                 "get_group_member_info",
                 {"group_id": claim.group_id, "user_id": claim.target_user_id, "no_cache": True},
             )

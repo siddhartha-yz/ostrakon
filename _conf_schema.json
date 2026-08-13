@@ -1,0 +1,34 @@
+{
+  "enabled_groups": {
+    "description": "启用 Ostrakon 的 QQ 群号列表",
+    "type": "list",
+    "default": [],
+    "hint": "留空时不会执行处罚；请填入群号字符串列表。"
+  },
+  "target_reaction_id": {
+    "description": "目标 reaction / emoji ID",
+    "type": "string",
+    "default": "",
+    "hint": "当前实测“愤怒机器人”为 326，但不同 NapCat/QQ 版本应以真实事件为准。留空进入诊断模式。"
+  },
+  "vote_threshold": {
+    "description": "触发处罚所需的不同投票用户数",
+    "type": "int",
+    "default": 10
+  },
+  "first_mute_seconds": {
+    "description": "首次处罚禁言秒数",
+    "type": "int",
+    "default": 600
+  },
+  "repeat_mute_seconds": {
+    "description": "重复处罚禁言秒数",
+    "type": "int",
+    "default": 7200
+  },
+  "repeat_window_seconds": {
+    "description": "重复处罚窗口秒数",
+    "type": "int",
+    "default": 604800
+  }
+}

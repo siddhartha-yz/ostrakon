@@ -1,0 +1,10 @@
+name: ostrakon
+display_name: Ostrakon / 陶片放逐
+desc: 基于 QQ reaction 投票的 AstrBot 群管理插件；达到阈值后自动禁言原消息发送者。
+short_desc: Reaction 投票触发的 QQ 群禁言插件。
+author: siddhartha-yz
+version: 0.2.0
+repo: https://github.com/siddhartha-yz/ostrakon
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.27,<5"
